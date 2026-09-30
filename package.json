@@ -1,1 +1,0 @@
-{"name":"valor-auto","main":"server.js","dependencies":{"discord.js":"^14.14.1","express":"^4.18.2"},"scripts":{"start":"node server.js"}}
