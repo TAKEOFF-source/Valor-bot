@@ -1,1 +1,5 @@
-discord.py==2.3.2
+discord.py==2.4.0
+audioop-lts
+flask
+aiohttp
+python-dotenv
