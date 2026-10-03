@@ -1,84 +1,74 @@
-from flask import Flask, jsonify
-import threading
 import discord
+import re
+from flask import Flask, jsonify
+from threading import Thread
 import os
-import json
 
-# --- Flask Part (Render ke liye) ---
 app = Flask(__name__)
+players_data = []
 
-DATA_FILE = "tiers.json"
-if not os.path.exists(DATA_FILE):
-    with open(DATA_FILE, "w") as f:
-        json.dump([], f)
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN") # Render me Env Var me daal dena
+CHANNEL_ID = 1528862155795992686
 
-# Function jo tier add karega
-def add_tier(name, dc, mode, rank):
-    with open(DATA_FILE, "r") as f:
-        players = json.load(f)
-
-    found = False
-    for p in players:
-        if p["name"].lower() == name.lower():
-            p.update({"dc": dc, "mode": mode, "rank": rank})
-            found = True
-            break
-    if not found:
-        players.append({"name": name, "dc": dc, "mode": mode, "rank": rank})
-
-    with open(DATA_FILE, "w") as f:
-        json.dump(players, f, indent=2)
-
-@app.route('/')
-def home():
-    return "Bot is running 24/7!"
-
-@app.route('/api/tiers')
-def get_tiers():
-    with open(DATA_FILE, "r") as f:
-        data = json.load(f)
-    return jsonify(data)
-
-def run_web():
-    app.run(host='0.0.0.0', port=10000)
-
-threading.Thread(target=run_web, daemon=True).start()
-
-# --- Tera Discord Bot ka code yaha se start ---
 intents = discord.Intents.default()
 intents.message_content = True
-intents.guilds = True
-intents.members = True
-
 client = discord.Client(intents=intents)
 
-@client.event
-async def on_ready():
-    print(f"[INFO] Logged in as {client.user}")
-    print(f"[INFO] Bot is ready and connected!")
+def parse_message(msg):
+    # msg example: "Rohan - Crystal - HT1 - Asia" ya "Rohan won LT2 in Mace"
+    msg = msg.lower()
+    # rank nikaalo HT1, LT2 etc
+    rank_match = re.search(r'(h?l?t\d)', msg)
+    if not rank_match:
+        return None
+    rank = rank_match.group(1).upper()
 
-# Yaha apna Whaler se copy wala logic daal dena
+    # kit nikaalo
+    kits = ["crystal", "mace", "boxing", "bedwars", "bed", "skywars", "sky", "buhc", "uhc", "mid"]
+    found_kit = "Overall"
+    for k in kits:
+        if k in msg:
+            found_kit = k
+            if k == "bed": found_kit = "bedwars"
+            if k == "sky": found_kit = "skywars"
+            if k == "box": found_kit = "boxing"
+            break
+
+    # naam nikaalo - pehla word
+    name = msg.split()[0].capitalize()
+    if len(name) < 2:
+        return None
+
+    return {
+        "name": name,
+        "rank": rank,
+        "mode": found_kit.capitalize(),
+        "dc": "GLOBAL" # region, tu chahe to Asia/NA/EU likh dega to auto le lega
+    }
+
 @client.event
 async def on_message(message):
+    if message.channel.id!= CHANNEL_ID:
+        return
     if message.author.bot:
         return
 
-    # EXAMPLE: Agar tu chat me likhega!addtier Venom @venom Crystal HT2
-    if message.content.startswith("!addtier"):
-        try:
-            parts = message.content.split()
-            #!addtier Name Discord Mode Rank
-            name = parts[1]
-            dc = parts[2]
-            mode = parts[3]
-            rank = parts[4]
-            add_tier(name, dc, mode, rank)
-            await message.channel.send(f"✅ Added {name} as {rank} in {mode} | Website updated!")
-        except:
-            await message.channel.send("Format: `!addtier Name @Discord Mode Rank`\nEx: `!addtier Venom @venom Crystal HT2`")
+    data = parse_message(message.content)
+    if data:
+        # purana same naam ka hatao, naya daalo
+        global players_data
+        players_data = [p for p in players_data if not (p['name'].lower() == data['name'].lower() and p['mode'].lower() == data['mode'].lower())]
+        players_data.insert(0, data)
+        # top 50 hi rakho
+        players_data = players_data[:50]
+        print(f"Added: {data}")
 
-    # Tera purana code yahi aayega
-    #...
+@app.route('/api/tiers')
+def get_tiers():
+    return jsonify(players_data)
 
-# Bot Token
-client.run(os.getenv("DISCORD_TOKEN"))
+def run_flask():
+    app.run(host='0.0.0.0', port=10000)
+
+Thread(target=run_flask).start()
+client.run(DISCORD_TOKEN)
